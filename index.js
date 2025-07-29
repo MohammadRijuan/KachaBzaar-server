@@ -78,7 +78,7 @@ async function run() {
             res.send(result);
         });
 
-        // DELETE ad
+        // DELETE advertisement 
         app.delete("/advertisements/:id", async (req, res) => {
             const { id } = req.params;
             const result = await advertisementCollection.deleteOne({ _id: new ObjectId(id) });
