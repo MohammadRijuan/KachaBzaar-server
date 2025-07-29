@@ -3,17 +3,25 @@ const cors = require('cors');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const cookieParser = require('cookie-parser');
 require('dotenv').config();
+const admin = require('firebase-admin');
 
 const app = express();
 const port = process.env.PORT || 5000;
 
+
+
 // Middlewares
-app.use(cors({
-    origin: ['http://localhost:5173'],
-    credentials: true
-}));
+app.use(cors());
 app.use(express.json());
 app.use(cookieParser());
+
+
+const decodedKey = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString('utf8');
+const serviceAccount = JSON.parse(decodedKey);
+
+admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+});
 
 // MongoDB URI
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.i0ofiio.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
@@ -31,7 +39,7 @@ const client = new MongoClient(uri, {
 // Main async function
 async function run() {
     try {
-        await client.connect();
+        client.connect();
 
         const userCollection = client.db('KachaBazaar-usersDB').collection('users');
         const productCollection = client.db('KachaBazaar-productsDB').collection('products');
