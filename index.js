@@ -44,6 +44,90 @@ async function run() {
         const userCollection = client.db('KachaBazaar-usersDB').collection('users');
         const productCollection = client.db('KachaBazaar-productsDB').collection('products');
         const advertisementCollection = client.db('KachaBazaar-adDB').collection('ads');
+        const reviewCollection = client.db('KachaBazaar-reviewDB').collection('reviews');
+        const cartCollection = client.db("kachaBazaarDB-cartDB").collection("carts");
+
+        //cart related api
+        app.get("/cart", async (req, res) => {
+            try {
+                const email = req.query.email?.trim().toLowerCase();
+                const items = await cartCollection.find({ email }).toArray();
+                res.send(items);
+            } catch (err) {
+                res.status(500).send({ error: "Failed to fetch cart", details: err.message });
+            }
+        });
+
+        app.post("/cart", async (req, res) => {
+            try {
+                const item = req.body;
+                item.email = item.email?.trim().toLowerCase();
+                item.date = new Date();
+                item.quantity = item.quantity || 1;
+                const result = await cartCollection.insertOne(item);
+                res.send(result);
+            } catch (err) {
+                res.status(500).send({ error: "Failed to add to cart", details: err.message });
+            }
+        });
+
+        app.delete("/cart/:id", async (req, res) => {
+            try {
+                const id = req.params.id;
+                const result = await cartCollection.deleteOne({ _id: new ObjectId(id) });
+                res.send(result);
+            } catch (err) {
+                res.status(500).send({ error: "Failed to delete cart item", details: err.message });
+            }
+        });
+
+        app.patch("/cart/:id", async (req, res) => {
+            try {
+                const id = req.params.id;
+                const { quantity } = req.body;
+                const result = await cartCollection.updateOne(
+                    { _id: new ObjectId(id) },
+                    { $set: { quantity } }
+                );
+                res.send(result);
+            } catch (err) {
+                res.status(500).send({ error: "Failed to update cart item", details: err.message });
+            }
+        });
+
+
+
+        // review related api
+        // POST: Add review
+        app.post('/reviews', async (req, res) => {
+            try {
+                const review = req.body;
+                review.date = new Date(); // Add timestamp
+                const result = await reviewCollection.insertOne(review);
+                res.status(201).send(result);
+            } catch (error) {
+                res.status(500).send({ message: 'Failed to submit review', error: error.message });
+            }
+        });
+
+        // GET: All reviews for a specific product
+        app.get('/reviews', async (req, res) => {
+            const { productId } = req.query;
+            if (!productId) {
+                return res.status(400).send({ message: 'productId query is required' });
+            }
+
+            try {
+                const reviews = await reviewCollection
+                    .find({ productId })
+                    .sort({ date: -1 })
+                    .toArray();
+                res.send(reviews);
+            } catch (error) {
+                res.status(500).send({ message: 'Failed to fetch reviews', error: error.message });
+            }
+        });
+
 
         //advertisement related api
         // Create advertisement
@@ -68,23 +152,29 @@ async function run() {
 
 
         // GET all ads (for admin)
-        app.get("/advertisements", async (req, res) => {
-            const result = await advertisementCollection.find().toArray();
-            res.send(result);
-        });
+        // app.get("/advertisements", async (req, res) => {
+        //     const result = await advertisementCollection.find().toArray();
+        //     res.send(result);
+        // });
 
         // PATCH ad status (approve/update)
         app.patch("/advertisements/:id", async (req, res) => {
-            const { id } = req.params;
-            const update = req.body;
+            try {
+                const { id } = req.params;
+                const update = req.body;
 
-            const result = await advertisementCollection.updateOne(
-                { _id: new ObjectId(id) },
-                { $set: update }
-            );
+                const result = await advertisementCollection.updateOne(
+                    { _id: new ObjectId(id) },
+                    { $set: update }
+                );
 
-            res.send(result);
+                res.send(result);
+            } catch (error) {
+                console.error("PATCH /advertisements/:id error:", error);
+                res.status(500).send({ error: "Failed to update advertisement", details: error.message });
+            }
         });
+
 
         // DELETE advertisement 
         app.delete("/advertisements/:id", async (req, res) => {
@@ -127,14 +217,38 @@ async function run() {
             res.send(products);
         });
 
+        // ✅ GET /approved-products?sort=asc&startDate=2024-07-01&endDate=2024-07-15
         app.get('/approved-products', async (req, res) => {
             try {
-                const approvedProducts = await productCollection.find({ status: "approved" }).toArray();
-                res.send(approvedProducts);
+                const { sort, startDate, endDate, search } = req.query;
+                const filter = { status: 'approved' };
+
+                // Search filter (case-insensitive regex on itemName)
+                if (search) {
+                    filter.itemName = { $regex: new RegExp(search, 'i') };
+                }
+
+                // Date filter
+                if (startDate || endDate) {
+                    filter.date = {};
+                    if (startDate) filter.date.$gte = new Date(startDate);
+                    if (endDate) filter.date.$lte = new Date(endDate);
+                }
+
+                const sortOrder = sort === 'asc' ? 1 : sort === 'desc' ? -1 : 0;
+
+                const products = await productCollection
+                    .find(filter)
+                    .sort(sortOrder ? { pricePerUnit: sortOrder } : {})
+                    .toArray();
+
+                res.send(products);
             } catch (err) {
-                res.status(500).send({ success: false, message: "Server Error", error: err.message });
+                res.status(500).send({ error: 'Failed to fetch products', details: err.message });
             }
         });
+
+
 
 
         app.get("/products/:id", async (req, res) => {
@@ -190,6 +304,23 @@ async function run() {
                 res.status(500).send({ success: false, message: "Server error", error: err.message });
             }
         });
+
+        // Update product fields
+        app.patch('/products/:id', async (req, res) => {
+            const id = req.params.id;
+            const update = req.body;
+
+            try {
+                const result = await productCollection.updateOne(
+                    { _id: new ObjectId(id) },
+                    { $set: update }
+                );
+                res.send(result);
+            } catch (err) {
+                res.status(500).send({ error: 'Update failed', details: err.message });
+            }
+        });
+
 
 
 
@@ -266,6 +397,21 @@ async function run() {
             const result = await userCollection.updateOne(filter, updateDoc);
             res.send(result);
         });
+
+        app.get("/users/search", async (req, res) => {
+            const email = req.query.email;
+            if (!email) return res.status(400).send({ message: "Email query missing" });
+            try {
+                // Assuming MongoDB + case-insensitive regex search on email
+                const regex = new RegExp(email, "i");
+                const users = await userCollection.find({ email: { $regex: regex } }).toArray();
+                res.send(users);
+            } catch (error) {
+                console.error(error);
+                res.status(500).send({ message: "Server error" });
+            }
+        });
+
 
         app.get('/users/:email/role', async (req, res) => {
             try {
